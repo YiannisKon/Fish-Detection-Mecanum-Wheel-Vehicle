@@ -1,6 +1,15 @@
-# Fish Detection Mecanum Wheel Vehicle
+# Fish-Operated Vehicle
 
 A goldfish drives a car.
+
+<p align="center">
+  <img src="docs/vehicle.jpg" width="48%" alt="The vehicle: tank, overhead camera rig, and mecanum chassis" />
+  <img src="docs/hud_frame.png" width="48%" alt="Live detection HUD: fish outline, heading arrow, and command vector" />
+</p>
+
+**[▶ Watch the demo on Instagram — 40,000+ views · 1,800+ likes in 72 hours](https://www.instagram.com/reel/DdIfr3PRKiI/)**
+
+Built in under 24 hours by a team of two · September 2026
 
 An overhead webcam watches a water tank mounted on a mecanum-wheel robot. The
 fish is detected in real time on a Raspberry Pi 5, its heading is estimated
@@ -70,7 +79,7 @@ pico/
   spin_test.py             single-motor bench test
   WIRING.md                complete pin map: Pico <-> drivers <-> motors <-> power
 scripts/                   RealSense build/diagnostic helpers (macOS)
-docs/                      example detection overlay
+docs/                      hardware photos + live detection HUD capture
 ```
 
 ## Hardware
@@ -84,6 +93,10 @@ docs/                      example detection overlay
 
 Wiring details, the driver truth table, and the power-up checklist are in
 [pico/WIRING.md](pico/WIRING.md).
+
+<p align="center">
+  <img src="docs/chassis.jpg" width="70%" alt="Chassis detail: mecanum wheels, 24 V battery, Raspberry Pi 5, and the tank platform" />
+</p>
 
 ## Running it
 
