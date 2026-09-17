@@ -132,7 +132,7 @@ Useful flags: `--max-speed`, `--deadzone`, `--rest`, `--accel`, `--decay`,
 
 ## Credits
 
-Fish: unnamed, orange, surprisingly decisive.
+Fish: Haaland, orange, surprisingly decisive.
 
 The code in this repository was written with the help of Claude (Anthropic),
 pair-programmed over one long hardware-debugging session that included USB
