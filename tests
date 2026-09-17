@@ -1,0 +1,159 @@
+"""Unit tests for the pure control-law math in fish_drive.py.
+
+These cover the functions marked "pure & unit-testable": the image->car frame
+mapping and the three fish-to-velocity control laws. No camera, serial port,
+or OpenCV runtime behaviour is involved.
+
+Run from the repo root:  pytest tests/
+"""
+import math
+
+import numpy as np
+import pytest
+
+from fish_drive import (
+    cam_to_car,
+    heading_command,
+    heading_radial_command,
+    position_to_velocity,
+    velocity_feedforward,
+)
+
+
+# --------------------------------------------------------------------------- #
+#  cam_to_car: image-frame vector -> car-frame velocity
+# --------------------------------------------------------------------------- #
+def test_cam_to_car_image_up_is_forward():
+    # Image "up" (negative y) with default mounting = car forward (+vx).
+    vx, vy = cam_to_car(0.0, -1.0)
+    assert vx == pytest.approx(1.0)
+    assert vy == pytest.approx(0.0)
+
+
+def test_cam_to_car_image_right_is_car_right():
+    # Image "right" (+x) = car right = NEGATIVE vy (car frame: vy left +).
+    vx, vy = cam_to_car(1.0, 0.0)
+    assert vx == pytest.approx(0.0)
+    assert vy == pytest.approx(-1.0)
+
+
+def test_cam_to_car_rot90_rotates_the_result():
+    # A 90 deg CCW camera mounting turns "image up" into a leftward command.
+    vx, vy = cam_to_car(0.0, -1.0, rot=90)
+    assert vx == pytest.approx(0.0, abs=1e-9)
+    assert vy == pytest.approx(1.0)
+
+
+def test_cam_to_car_mirror_flips_left_right_only():
+    vx_m, vy_m = cam_to_car(1.0, 0.0, mirror=True)
+    vx, vy = cam_to_car(-1.0, 0.0)
+    assert (vx_m, vy_m) == pytest.approx((vx, vy))
+
+
+# --------------------------------------------------------------------------- #
+#  position mode: tank-as-joystick
+# --------------------------------------------------------------------------- #
+def test_position_center_gives_zero():
+    vx, vy, r = position_to_velocity(320, 240, 640, 480, deadzone=0.12,
+                                     max_speed=0.35)
+    assert (vx, vy) == (0.0, 0.0)
+    assert r == pytest.approx(0.0, abs=1e-6)
+
+
+def test_position_inside_deadzone_gives_zero():
+    # Offset radius 0.10 < deadzone 0.12 -> parked, but r is still reported.
+    vx, vy, r = position_to_velocity(320 + 0.10 * 320, 240, 640, 480,
+                                     deadzone=0.12, max_speed=0.35)
+    assert (vx, vy) == (0.0, 0.0)
+    assert r == pytest.approx(0.10)
+
+
+def test_position_full_speed_at_full_at_then_capped():
+    # At r == full_at the throttle hits exactly max_speed...
+    vx, vy, _ = position_to_velocity(320, 240 + 0.52 * 240, 640, 480,
+                                     deadzone=0.12, max_speed=0.35,
+                                     full_at=0.52)
+    assert math.hypot(vx, vy) == pytest.approx(0.35)
+    # ...and stays capped beyond it (fish near the wall, r ~ 0.9).
+    vx, vy, _ = position_to_velocity(320, 240 + 0.9 * 240, 640, 480,
+                                     deadzone=0.12, max_speed=0.35,
+                                     full_at=0.52)
+    assert math.hypot(vx, vy) == pytest.approx(0.35)
+
+
+def test_position_direction_matches_offset():
+    # Fish below center (image +y) -> car backward (-vx), no sideways drift.
+    vx, vy, _ = position_to_velocity(320, 240 + 0.5 * 240, 640, 480,
+                                     deadzone=0.12, max_speed=0.35)
+    assert vx < 0
+    assert vy == pytest.approx(0.0, abs=1e-9)
+
+
+# --------------------------------------------------------------------------- #
+#  heading mode, radial speed: instant mapping, no state
+# --------------------------------------------------------------------------- #
+def test_heading_radial_parked_inside_rest():
+    vx, vy = heading_radial_command(np.array([0.0, -1.0]), rnorm=0.05,
+                                    rest=0.12, full_at=0.52, max_speed=0.35)
+    assert (vx, vy) == (0.0, 0.0)
+
+
+def test_heading_radial_direction_is_head_not_position():
+    # Fish sits toward the RIGHT of the tank but FACES image-up:
+    # the car must drive FORWARD (where the head points), not sideways.
+    vx, vy = heading_radial_command(np.array([0.0, -1.0]), rnorm=0.52,
+                                    rest=0.12, full_at=0.52, max_speed=0.35)
+    assert vx == pytest.approx(0.35)
+    assert vy == pytest.approx(0.0, abs=1e-9)
+
+
+# --------------------------------------------------------------------------- #
+#  heading mode, accel speed: effort-gated integrator
+# --------------------------------------------------------------------------- #
+def test_heading_accel_swimming_builds_cruise_resting_decays():
+    head = np.array([0.0, -1.0])                 # facing image-up
+    swim = np.array([0.0, -120.0])               # swimming along its facing
+    rest = np.array([0.0, 0.0])
+    kw = dict(w=640, h=480, accel=0.30, decay=0.28, effort_min=0.04,
+              effort_ref=0.40, max_speed=0.35)
+    _, _, cruise, effort = heading_command(head, swim, cruise=0.0, dt=1.0, **kw)
+    assert effort > 0.04
+    assert cruise > 0.0
+    _, _, cruise2, _ = heading_command(head, rest, cruise=cruise, dt=1.0, **kw)
+    assert cruise2 < cruise                      # decays while resting
+
+
+def test_heading_accel_sideways_drift_earns_nothing():
+    # Effort is the dot product of swim velocity and facing: drifting
+    # PERPENDICULAR to the facing must not accelerate the car.
+    head = np.array([0.0, -1.0])
+    drift = np.array([200.0, 0.0])
+    _, _, cruise, effort = heading_command(head, drift, cruise=0.0, dt=1.0,
+                                           w=640, h=480, accel=0.30,
+                                           decay=0.28, effort_min=0.04,
+                                           effort_ref=0.40, max_speed=0.35)
+    assert effort == pytest.approx(0.0)
+    assert cruise == 0.0
+
+
+def test_heading_accel_cruise_clamped_to_max_speed():
+    head = np.array([0.0, -1.0])
+    swim = np.array([0.0, -500.0])
+    _, _, cruise, _ = heading_command(head, swim, cruise=0.34, dt=10.0,
+                                      w=640, h=480, accel=0.30, decay=0.28,
+                                      effort_min=0.04, effort_ref=0.40,
+                                      max_speed=0.35)
+    assert cruise == pytest.approx(0.35)
+
+
+# --------------------------------------------------------------------------- #
+#  velocity feedforward: isotropic px/s -> command
+# --------------------------------------------------------------------------- #
+def test_feedforward_is_isotropic():
+    # The same swim speed must produce the same command magnitude in any
+    # direction (normalized by the LARGER frame half-dimension for both axes).
+    fast_x = velocity_feedforward((320.0, 0.0), 640, 480, kv=0.3)
+    fast_y = velocity_feedforward((0.0, 320.0), 640, 480, kv=0.3)
+    assert math.hypot(*fast_x) == pytest.approx(math.hypot(*fast_y))
+    # Half-frame-width per second (320 px/s in a 640-wide frame) == 1.0 * kv.
+    assert math.hypot(*fast_x) == pytest.approx(0.3)
